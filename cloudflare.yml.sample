@@ -1,0 +1,9 @@
+auth:
+  scopedToken: your-cloudflare-api-token
+domains:
+  - name: your.domain
+    type: A
+    proxied: true
+    create: true
+    zoneId: your-cloudflare-zone-id
+

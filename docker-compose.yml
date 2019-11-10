@@ -1,0 +1,78 @@
+version: "3.3"
+
+services:
+  traefik:
+    image: "traefik:v2.0.4"
+    container_name: "traefik"
+    command:
+      # open http and https to proxy
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+
+      # listen to docker but don't expose containers unless explicitly told to
+      - "--providers.docker.exposedbydefault=false"
+
+      # setup lets encrypt with cloudflare
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare"
+      - "--certificatesresolvers.letsencrypt.acme.email=${LETS_ENCRYPT_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/lets_encrypt/acme.json"
+
+      # enable api and dashboard, create service named `api@internal`
+      - "--api"
+
+      # options for development
+      #- "--log.level=DEBUG"
+      #- "--api.insecure=true"
+    labels:
+      # create a redirect middleware named `redirect-to-https`
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+
+      # catch all unsecure `web` traffic and redirect to https
+      - "traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)"
+      - "traefik.http.routers.http-catchall.entrypoints=web"
+      - "traefik.http.routers.http-catchall.middlewares=redirect-to-https@docker"
+
+      # create a middleware for authorization named `basic-auth`
+      - "traefik.http.middlewares.basic-auth.basicauth.users=${AUTH_USERNAME}:${AUTH_PASSWORD}"
+
+      # expose dashboard and api
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.${DOMAIN}`)"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik.middlewares=basic-auth@docker"
+    ports:
+      # entry point `web`
+      - "80:80"
+      # entry point `websecure`
+      - "443:443"
+      # enabled by --api.insecure=true
+      - "8080:8080"
+    environment:
+      - CLOUDFLARE_DNS_API_TOKEN=${CLOUDFLARE_DNS_API_TOKEN}
+      - CLOUDFLARE_ZONE_API_TOKEN=${CLOUDFLARE_ZONE_API_TOKEN}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./lets_encrypt:/lets_encrypt
+    restart: always
+
+  whoami:
+    image: "containous/whoami"
+    container_name: "whoami"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.whoami.rule=Host(`whoami.${DOMAIN}`)"
+      - "traefik.http.routers.whoami.entrypoints=websecure"
+      - "traefik.http.routers.whoami.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.whoami.middlewares=basic-auth@docker"
+    restart: always
+
+  cloudflare-ddns:
+    image: joshava/cloudflare-ddns:latest
+    container_name: cloudflare-ddns
+    volumes:
+      - ./cloudflare.yml:/app/config.yaml
+    restart: always
+
